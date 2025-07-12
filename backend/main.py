@@ -91,24 +91,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global state
-storage = SecureStorage(Path.home() / ".publicador")
-article_manager = ArticleManager(Path.home() / "Documents" / "Articles")
+# Global state - Handle Vercel environment
+base_dir = Path(os.environ.get('BASE_DIR', Path(__file__).parent.parent))
+temp_dir = Path("/tmp") if os.environ.get('VERCEL') else Path.home()
+
+storage = SecureStorage(temp_dir / ".publicador")
+article_manager = ArticleManager(temp_dir / "Articles")
 current_profile: Optional[WordPressProfile] = None
 
 # Mount static files
-static_path = Path(__file__).parent.parent / "static"
-app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+static_path = base_dir / "static"
+if static_path.exists():
+    app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 
 # Serve the main HTML file
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     """Serve the main application page"""
-    html_file = Path(__file__).parent.parent / "frontend" / "index.html"
+    html_file = base_dir / "frontend" / "index.html"
     if html_file.exists():
         with open(html_file, 'r', encoding='utf-8') as f:
             return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>WordPress Publisher</h1><p>Frontend not found</p>")
+    return HTMLResponse(content="<h1>WordPress Publisher</h1><p>Frontend not found</p><p>Base dir: " + str(base_dir) + "</p>")
 
 
 # Profile Management Endpoints
