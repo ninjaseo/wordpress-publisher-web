@@ -1,4 +1,4 @@
-# 🎉 WordPress Publisher - Aplicación Web Moderna
+# 🎉 WordPress Publisher - Aplicación Web Moderna -
 
 ## ✅ **PROBLEMA SOLUCIONADO**
 
