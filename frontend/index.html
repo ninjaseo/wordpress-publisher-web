@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📝 Publicador WordPress</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/styles.css?v=2.0">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="container">
+                <h1 class="logo">
+                    <i class="fas fa-newspaper"></i>
+                    Publicador WordPress
+                </h1>
+                <div class="status-indicator">
+                    <span id="status-text">🟢 Listo</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="container">
+                <!-- Profile Section -->
+                <section class="section profile-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-link"></i> Configuración de WordPress</h2>
+                    </div>
+                    <div class="section-content">
+                        <div class="profile-controls">
+                            <div class="profile-selector">
+                                <label for="profile-select">📌 Perfil activo:</label>
+                                <select id="profile-select" class="form-select">
+                                    <option value="">Selecciona un perfil</option>
+                                </select>
+                            </div>
+                            <button id="manage-profiles-btn" class="btn btn-secondary">
+                                <i class="fas fa-cog"></i> Gestionar Perfiles
+                            </button>
+                        </div>
+                        <div id="profile-info" class="profile-info" style="display: none;">
+                            <div class="profile-details">
+                                <span id="profile-details-text"></span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Articles Section -->
+                <section class="section articles-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-file-alt"></i> Gestión de Artículos</h2>
+                    </div>
+                    <div class="section-content">
+                        <!-- Directory Selection -->
+                        <div class="directory-controls">
+                            <div class="directory-info">
+                                <span id="current-directory">📁 Carpeta: </span>
+                            </div>
+                            <div class="directory-actions">
+                                <button id="change-directory-btn" class="btn btn-outline">
+                                    <i class="fas fa-folder-open"></i> Cambiar
+                                </button>
+                                <button id="refresh-files-btn" class="btn btn-outline">
+                                    <i class="fas fa-sync-alt"></i> Actualizar
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Article Selection with Individual Options -->
+                        <div class="files-section">
+                            <div class="files-header">
+                                <h3>📋 Selecciona artículos y configura opciones:</h3>
+                                <div class="files-actions">
+                                    <button id="select-all-btn" class="btn btn-sm">☑️ Todos</button>
+                                    <button id="deselect-all-btn" class="btn btn-sm">☐ Ninguno</button>
+                                </div>
+                            </div>
+                            <div id="article-grid" class="article-grid">
+                                <!-- Article cards will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Global Publication Options Section -->
+                <section class="section options-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-cogs"></i> Opciones Globales</h2>
+                    </div>
+                    <div class="section-content">
+                        <!-- Categories and Tags -->
+                        <div class="taxonomy-controls">
+                            <div class="taxonomy-group">
+                                <div class="taxonomy-header">
+                                    <h3><i class="fas fa-tags"></i> Categorías (todas)</h3>
+                                </div>
+                                <div class="taxonomy-content">
+                                    <div id="selected-categories" class="taxonomy-info">
+                                        Ninguna seleccionada
+                                    </div>
+                                    <button id="select-categories-btn" class="btn btn-outline">
+                                        <i class="fas fa-edit"></i> Seleccionar
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="taxonomy-group">
+                                <div class="taxonomy-header">
+                                    <h3><i class="fas fa-hashtag"></i> Etiquetas (todas)</h3>
+                                </div>
+                                <div class="taxonomy-content">
+                                    <div id="selected-tags" class="taxonomy-info">
+                                        Ninguna seleccionadas
+                                    </div>
+                                    <button id="select-tags-btn" class="btn btn-outline">
+                                        <i class="fas fa-edit"></i> Seleccionar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Action Section -->
+                <section class="section action-section">
+                    <div class="section-header">
+                        <h2><i class="fas fa-rocket"></i> Acciones</h2>
+                    </div>
+                    <div class="section-content">
+                        <div class="action-buttons">
+                            <button id="publish-btn" class="btn btn-primary btn-large">
+                                <i class="fas fa-paper-plane"></i> Publicar Seleccionados
+                            </button>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modals -->
+    
+    <!-- Profile Management Modal -->
+    <div id="profile-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-user-cog"></i> Gestionar Perfiles</h2>
+                <button class="modal-close" onclick="closeModal('profile-modal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="profiles-list">
+                    <div id="profiles-container">
+                        <!-- Profiles will be loaded here -->
+                    </div>
+                </div>
+                <div class="profile-actions">
+                    <button id="new-profile-btn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Nuevo Perfil
+                    </button>
+                    <button id="test-connection-btn" class="btn btn-secondary" disabled>
+                        <i class="fas fa-wifi"></i> Probar Conexión
+                    </button>
+                    <button id="delete-profile-btn" class="btn btn-danger" disabled>
+                        <i class="fas fa-trash"></i> Eliminar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Profile Form Modal -->
+    <div id="profile-form-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-plus-circle"></i> Nuevo Perfil WordPress</h2>
+                <button class="modal-close" onclick="closeModal('profile-form-modal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="profile-form">
+                    <div class="form-group">
+                        <label for="profile-name">📝 Nombre del perfil:</label>
+                        <input type="text" id="profile-name" class="form-input" placeholder="Ej: Mi Blog Personal" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="profile-url">🌐 URL del sitio WordPress:</label>
+                        <input type="url" id="profile-url" class="form-input" placeholder="https://ejemplo.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="profile-username">👤 Nombre de usuario:</label>
+                        <input type="text" id="profile-username" class="form-input" placeholder="usuario" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="profile-password">🔑 Contraseña de aplicación:</label>
+                        <input type="password" id="profile-password" class="form-input" 
+                               placeholder="Contraseña de aplicación de WordPress" required>
+                    </div>
+                    <div class="form-info">
+                        <p><strong>💡 Información importante:</strong></p>
+                        <p>Necesitas crear una 'Contraseña de Aplicación' en tu WordPress:</p>
+                        <ul>
+                            <li>Ve a: Usuario → Perfil → Contraseñas de aplicación</li>
+                            <li>Crea una nueva con nombre 'Publicador'</li>
+                            <li>Copia la contraseña generada aquí</li>
+                        </ul>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save"></i> Guardar
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="closeModal('profile-form-modal')">
+                            <i class="fas fa-times"></i> Cancelar
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Taxonomy Selection Modal -->
+    <div id="taxonomy-modal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2 id="taxonomy-modal-title"><i class="fas fa-tags"></i> Seleccionar</h2>
+                <button class="modal-close" onclick="closeModal('taxonomy-modal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="taxonomy-search">
+                    <input type="text" id="taxonomy-search" class="form-input" placeholder="🔍 Buscar...">
+                </div>
+                <div class="taxonomy-list">
+                    <div id="taxonomy-items">
+                        <!-- Items will be loaded here -->
+                    </div>
+                </div>
+                <div class="taxonomy-new">
+                    <h3>➕ Agregar nuevo elemento:</h3>
+                    <div class="new-item-controls">
+                        <input type="text" id="new-taxonomy-item" class="form-input" placeholder="Nombre del nuevo elemento">
+                        <button id="add-taxonomy-btn" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> Agregar
+                        </button>
+                    </div>
+                </div>
+                <div class="taxonomy-actions">
+                    <button id="select-all-taxonomy-btn" class="btn btn-secondary">
+                        <i class="fas fa-check-square"></i> Seleccionar Todos
+                    </button>
+                    <button id="deselect-all-taxonomy-btn" class="btn btn-secondary">
+                        <i class="fas fa-square"></i> Deseleccionar Todos
+                    </button>
+                    <button id="accept-taxonomy-btn" class="btn btn-primary">
+                        <i class="fas fa-check"></i> Aceptar
+                    </button>
+                    <button class="btn btn-secondary" onclick="closeModal('taxonomy-modal')">
+                        <i class="fas fa-times"></i> Cancelar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results Modal -->
+    <div id="results-modal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2><i class="fas fa-chart-bar"></i> Resultados de Publicación</h2>
+                <button class="modal-close" onclick="closeModal('results-modal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="results-content">
+                    <!-- Results will be shown here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay" style="display: none;">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <p id="loading-text">Cargando...</p>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- JavaScript -->
+    <script src="/static/js/app_improved.js?v=2.0"></script>
+</body>
+</html>

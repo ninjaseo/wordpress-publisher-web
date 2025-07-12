@@ -1,0 +1,939 @@
+/**
+ * WordPress Publisher Web Application - Improved Version
+ * Enhanced with retry logic, better error handling, and performance optimizations
+ */
+
+class WordPressPublisherImproved {
+    constructor() {
+        this.currentProfile = null;
+        this.articles = [];
+        this.selectedCategories = []; // Global categories
+        this.selectedTags = []; // Global tags
+        this.availableCategories = [];
+        this.availableTags = [];
+        this.currentTaxonomyType = null;
+        this.selectedProfileName = null;
+        this.currentArticleIndex = null; // For individual taxonomy selection
+        
+        // Performance settings
+        this.requestTimeout = 30000; // 30 seconds
+        this.maxRetries = 3;
+        this.retryDelay = 1000; // 1 second
+        
+        // Request queue to prevent flooding
+        this.requestQueue = new Map();
+        
+        this.init();
+    }
+
+    async init() {
+        this.bindEvents();
+        await this.loadProfiles();
+        await this.loadCurrentDirectory();
+        await this.loadFiles();
+        this.updateStatus('🟢 Aplicación cargada correctamente');
+    }
+
+    bindEvents() {
+        // Profile management
+        document.getElementById('manage-profiles-btn').addEventListener('click', () => this.openProfileModal());
+        document.getElementById('profile-select').addEventListener('change', (e) => this.selectProfile(e.target.value));
+        
+        // Profile modal events
+        document.getElementById('new-profile-btn').addEventListener('click', () => this.openProfileForm());
+        document.getElementById('test-connection-btn').addEventListener('click', () => this.testConnection());
+        document.getElementById('delete-profile-btn').addEventListener('click', () => this.deleteProfile());
+        document.getElementById('profile-form').addEventListener('submit', (e) => this.saveProfile(e));
+
+        // File management
+        document.getElementById('change-directory-btn').addEventListener('click', () => this.changeDirectory());
+        document.getElementById('refresh-files-btn').addEventListener('click', () => this.loadFiles());
+        document.getElementById('select-all-btn').addEventListener('click', () => this.selectAllFiles());
+        document.getElementById('deselect-all-btn').addEventListener('click', () => this.deselectAllFiles());
+
+        // Global taxonomy management
+        document.getElementById('select-categories-btn').addEventListener('click', () => this.openTaxonomyModal('categories'));
+        document.getElementById('select-tags-btn').addEventListener('click', () => this.openTaxonomyModal('tags'));
+        
+        // Taxonomy modal events
+        document.getElementById('taxonomy-search').addEventListener('input', (e) => this.filterTaxonomy(e.target.value));
+        document.getElementById('add-taxonomy-btn').addEventListener('click', () => this.addNewTaxonomyItem());
+        document.getElementById('select-all-taxonomy-btn').addEventListener('click', () => this.selectAllTaxonomy());
+        document.getElementById('deselect-all-taxonomy-btn').addEventListener('click', () => this.deselectAllTaxonomy());
+        document.getElementById('accept-taxonomy-btn').addEventListener('click', () => this.acceptTaxonomySelection());
+
+        // Publication
+        document.getElementById('publish-btn').addEventListener('click', () => this.publishArticles());
+
+        // Modal close events
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('modal')) {
+                this.closeModal(e.target.id);
+            }
+        });
+    }
+
+    // Enhanced API Methods with Retry Logic
+    async apiCall(endpoint, method = 'GET', data = null, retries = this.maxRetries) {
+        const requestId = `${method}-${endpoint}`;
+        
+        // Prevent duplicate requests
+        if (this.requestQueue.has(requestId)) {
+            return this.requestQueue.get(requestId);
+        }
+
+        const makeRequest = async () => {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), this.requestTimeout);
+
+                const options = {
+                    method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    signal: controller.signal
+                };
+
+                if (data) {
+                    options.body = JSON.stringify(data);
+                }
+
+                const response = await fetch(`/api${endpoint}`, options);
+                clearTimeout(timeoutId);
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || `HTTP ${response.status}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    throw new Error('Request timeout');
+                }
+                throw error;
+            }
+        };
+
+        const requestPromise = this.retryRequest(makeRequest, retries);
+        this.requestQueue.set(requestId, requestPromise);
+        
+        try {
+            const result = await requestPromise;
+            return result;
+        } finally {
+            this.requestQueue.delete(requestId);
+        }
+    }
+
+    async retryRequest(requestFn, retries) {
+        let lastError;
+        
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                return await requestFn();
+            } catch (error) {
+                lastError = error;
+                
+                if (attempt === retries) {
+                    break; // No more retries
+                }
+                
+                // Exponential backoff
+                const delay = this.retryDelay * Math.pow(2, attempt);
+                await this.sleep(delay);
+                
+                console.log(`Retry attempt ${attempt + 1}/${retries} after ${delay}ms`);
+            }
+        }
+        
+        throw lastError;
+    }
+
+    async uploadFile(file, endpoint, retries = this.maxRetries) {
+        const requestId = `UPLOAD-${endpoint}`;
+        
+        if (this.requestQueue.has(requestId)) {
+            return this.requestQueue.get(requestId);
+        }
+
+        const makeRequest = async () => {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s for uploads
+
+                const formData = new FormData();
+                formData.append('file', file);
+
+                const response = await fetch(`/api${endpoint}`, {
+                    method: 'POST',
+                    body: formData,
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || `HTTP ${response.status}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    throw new Error('Upload timeout');
+                }
+                throw error;
+            }
+        };
+
+        const requestPromise = this.retryRequest(makeRequest, retries);
+        this.requestQueue.set(requestId, requestPromise);
+        
+        try {
+            return await requestPromise;
+        } finally {
+            this.requestQueue.delete(requestId);
+        }
+    }
+
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // Enhanced Article Management
+    async loadFiles() {
+        try {
+            this.showLoading('Cargando archivos...');
+            const files = await this.apiCall('/files');
+            this.articles = files.map(file => ({
+                ...file,
+                selected: false,
+                status: 'draft',
+                featured_image: null,
+                categories: [], // Individual categories for this article
+                tags: [] // Individual tags for this article
+            }));
+            this.renderArticleTable();
+            this.hideLoading();
+        } catch (error) {
+            this.hideLoading();
+            this.showToast('Error cargando archivos: ' + error.message, 'error');
+        }
+    }
+
+    renderArticleTable() {
+        const container = document.getElementById('article-grid');
+        container.innerHTML = '';
+
+        if (this.articles.length === 0) {
+            container.innerHTML = '<p style="text-align: center; color: #6b7280; padding: 2rem;">No hay archivos .txt o .md en esta carpeta</p>';
+            return;
+        }
+
+        // Create table structure
+        const table = document.createElement('table');
+        table.className = 'articles-table';
+        
+        // Table header
+        const thead = document.createElement('thead');
+        thead.innerHTML = `
+            <tr>
+                <th style="width: 40px;">✓</th>
+                <th style="width: 250px;">📄 Archivo</th>
+                <th style="width: 120px;">📊 Estado</th>
+                <th style="width: 80px;">🖼️ Imagen</th>
+                <th style="width: 180px;">🏷️ Categorías</th>
+                <th style="width: 180px;">🔖 Etiquetas</th>
+                <th style="width: 100px;">📏 Tamaño</th>
+                <th style="width: 140px;">📅 Modificado</th>
+            </tr>
+        `;
+        table.appendChild(thead);
+        
+        // Table body
+        const tbody = document.createElement('tbody');
+        this.articles.forEach((article, index) => {
+            const row = this.createArticleRow(article, index);
+            tbody.appendChild(row);
+        });
+        table.appendChild(tbody);
+        
+        container.appendChild(table);
+    }
+
+    createArticleCard(article, index) {
+        const card = document.createElement('div');
+        card.className = `article-card ${article.selected ? 'selected' : ''}`;
+        
+        card.innerHTML = `
+            <div class="article-header">
+                <div class="article-info">
+                    <div class="article-title">${article.name}</div>
+                    <div class="article-details">${this.formatFileSize(article.size)} • Modificado: ${this.formatDate(article.modified)}</div>
+                </div>
+                <input type="checkbox" class="article-checkbox" ${article.selected ? 'checked' : ''} 
+                       onchange="app.toggleArticleSelection(${index})">
+            </div>
+            <div class="article-options">
+                <div class="option-row">
+                    <span class="option-label">Estado:</span>
+                    <select class="status-select" onchange="app.updateArticleStatus(${index}, this.value)">
+                        <option value="draft" ${article.status === 'draft' ? 'selected' : ''}>🟡 Borrador</option>
+                        <option value="publish" ${article.status === 'publish' ? 'selected' : ''}>🟢 Publicar</option>
+                    </select>
+                </div>
+                <div class="option-row">
+                    <span class="option-label">Imagen:</span>
+                    <div class="image-upload">
+                        <input type="file" accept="image/*" onchange="app.updateArticleImage(${index}, this)">
+                        <div class="image-upload-btn">
+                            <i class="fas fa-image"></i> Seleccionar
+                        </div>
+                    </div>
+                    <span class="image-preview">${article.featured_image ? '✅ Seleccionada' : ''}</span>
+                </div>
+            </div>
+        `;
+
+        return card;
+    }
+
+    createArticleRow(article, index) {
+        const row = document.createElement('tr');
+        row.className = `article-row ${article.selected ? 'selected' : ''}`;
+        
+        // Format individual categories and tags for display
+        const categoriesDisplay = article.categories.length > 0 
+            ? article.categories.map(id => {
+                const cat = this.availableCategories.find(c => c.id === id);
+                return cat ? cat.name : '';
+            }).filter(name => name).join(', ') 
+            : '';
+            
+        const tagsDisplay = article.tags.length > 0 
+            ? article.tags.map(id => {
+                const tag = this.availableTags.find(t => t.id === id);
+                return tag ? tag.name : '';
+            }).filter(name => name).join(', ') 
+            : '';
+        
+        row.innerHTML = `
+            <td style="text-align: center;">
+                <input type="checkbox" class="article-checkbox" ${article.selected ? 'checked' : ''} 
+                       onchange="app.toggleArticleSelection(${index})">
+            </td>
+            <td class="file-name">
+                <div class="file-title" title="${article.name}">${article.name}</div>
+            </td>
+            <td>
+                <select class="status-select compact" onchange="app.updateArticleStatus(${index}, this.value)">
+                    <option value="draft" ${article.status === 'draft' ? 'selected' : ''}>🟡 Borrador</option>
+                    <option value="publish" ${article.status === 'publish' ? 'selected' : ''}>🟢 Publicar</option>
+                </select>
+            </td>
+            <td style="text-align: center;">
+                <div class="image-upload compact">
+                    <input type="file" accept="image/*" onchange="app.updateArticleImage(${index}, this)" 
+                           id="file-${index}" style="display: none;">
+                    <button type="button" onclick="document.getElementById('file-${index}').click()" 
+                            class="btn-image ${article.featured_image ? 'has-image' : ''}"
+                            title="${article.featured_image ? 'Imagen seleccionada' : 'Seleccionar imagen'}">
+                        ${article.featured_image ? '✅' : '📷'}
+                    </button>
+                </div>
+            </td>
+            <td>
+                <div class="taxonomy-cell">
+                    <span class="taxonomy-display" title="${categoriesDisplay || 'Ninguna categoría'}">${categoriesDisplay || 'Ninguna'}</span>
+                    <button type="button" onclick="app.openIndividualTaxonomyModal(${index}, 'categories')" 
+                            class="btn-taxonomy" title="Editar categorías">✏️</button>
+                </div>
+            </td>
+            <td>
+                <div class="taxonomy-cell">
+                    <span class="taxonomy-display" title="${tagsDisplay || 'Ninguna etiqueta'}">${tagsDisplay || 'Ninguna'}</span>
+                    <button type="button" onclick="app.openIndividualTaxonomyModal(${index}, 'tags')" 
+                            class="btn-taxonomy" title="Editar etiquetas">✏️</button>
+                </div>
+            </td>
+            <td class="file-size" style="text-align: right;">${this.formatFileSize(article.size)}</td>
+            <td class="file-date">${this.formatDate(article.modified)}</td>
+        `;
+
+        return row;
+    }
+
+    toggleArticleSelection(index) {
+        this.articles[index].selected = !this.articles[index].selected;
+        this.renderArticleTable();
+    }
+
+    updateArticleStatus(index, status) {
+        this.articles[index].status = status;
+    }
+
+    updateArticleImage(index, input) {
+        const file = input.files[0];
+        if (file) {
+            this.articles[index].featured_image = file;
+            this.renderArticleTable();
+        }
+    }
+
+    selectAllFiles() {
+        this.articles.forEach(article => article.selected = true);
+        this.renderArticleTable();
+    }
+
+    deselectAllFiles() {
+        this.articles.forEach(article => article.selected = false);
+        this.renderArticleTable();
+    }
+
+    // Enhanced Publication with Progress
+    async publishArticles() {
+        const selectedArticles = this.articles.filter(article => article.selected);
+        
+        if (selectedArticles.length === 0) {
+            this.showToast('Selecciona al menos un artículo', 'warning');
+            return;
+        }
+
+        if (!this.currentProfile) {
+            this.showToast('Selecciona un perfil de WordPress', 'warning');
+            return;
+        }
+
+        try {
+            this.showLoading('Publicando artículos...');
+            
+            const results = [];
+            let completed = 0;
+            
+            for (const article of selectedArticles) {
+                try {
+                    this.updateStatus(`Publicando ${completed + 1}/${selectedArticles.length}: ${article.name}`);
+                    
+                    // Upload featured image if exists
+                    let featuredMediaId = null;
+                    if (article.featured_image) {
+                        const imageResult = await this.uploadFile(article.featured_image, `/upload-image/${this.selectedProfileName}`);
+                        featuredMediaId = imageResult.media_id;
+                    }
+
+                    // Use individual categories/tags if set, otherwise use global ones
+                    const categories = article.categories.length > 0 ? article.categories : this.selectedCategories;
+                    const tags = article.tags.length > 0 ? article.tags : this.selectedTags;
+                    
+                    // Publish article
+                    const publishData = {
+                        file_path: article.path,
+                        status: article.status,
+                        categories: categories,
+                        tags: tags,
+                        featured_media: featuredMediaId
+                    };
+
+                    const result = await this.apiCall(`/publish/${this.selectedProfileName}`, 'POST', publishData);
+                    results.push({
+                        filename: article.name,
+                        success: true,
+                        url: result.url,
+                        status: article.status
+                    });
+                    
+                    completed++;
+                    
+                } catch (error) {
+                    results.push({
+                        filename: article.name,
+                        success: false,
+                        error: error.message
+                    });
+                    completed++;
+                }
+            }
+
+            this.hideLoading();
+            this.updateStatus('🟢 Listo');
+            this.showPublishResults(results);
+            
+        } catch (error) {
+            this.hideLoading();
+            this.updateStatus('🟢 Listo');
+            this.showToast('Error durante la publicación: ' + error.message, 'error');
+        }
+    }
+
+    // Profile Management - Enhanced
+    async loadProfiles() {
+        try {
+            const profiles = await this.apiCall('/profiles');
+            this.populateProfileSelect(profiles);
+        } catch (error) {
+            this.showToast('Error cargando perfiles: ' + error.message, 'error');
+        }
+    }
+
+    populateProfileSelect(profiles) {
+        const select = document.getElementById('profile-select');
+        select.innerHTML = '<option value="">Selecciona un perfil</option>';
+        
+        profiles.forEach(profile => {
+            const option = document.createElement('option');
+            option.value = profile.name;
+            option.textContent = `${profile.name} (${profile.url})`;
+            select.appendChild(option);
+        });
+    }
+
+    async selectProfile(profileName) {
+        if (!profileName) {
+            this.currentProfile = null;
+            this.hideProfileInfo();
+            return;
+        }
+
+        try {
+            this.showLoading('Cargando perfil...');
+            const profile = await this.apiCall(`/profiles/${profileName}`);
+            this.currentProfile = profile;
+            this.selectedProfileName = profileName;
+            this.showProfileInfo(profile);
+            await this.loadTaxonomies();
+            this.hideLoading();
+        } catch (error) {
+            this.hideLoading();
+            this.showToast('Error cargando perfil: ' + error.message, 'error');
+        }
+    }
+
+    showProfileInfo(profile) {
+        const infoDiv = document.getElementById('profile-info');
+        const detailsSpan = document.getElementById('profile-details-text');
+        detailsSpan.textContent = `✅ Conectado a: ${profile.url} (Usuario: ${profile.username})`;
+        infoDiv.style.display = 'block';
+    }
+
+    hideProfileInfo() {
+        document.getElementById('profile-info').style.display = 'none';
+    }
+
+    // Directory Management
+    async loadCurrentDirectory() {
+        try {
+            const response = await this.apiCall('/current-directory');
+            document.getElementById('current-directory').textContent = `📁 Carpeta: ${response.directory}`;
+        } catch (error) {
+            console.error('Error loading directory:', error);
+        }
+    }
+
+    async changeDirectory() {
+        try {
+            const response = await this.apiCall('/change-directory', 'POST');
+            if (response.success) {
+                await this.loadCurrentDirectory();
+                await this.loadFiles();
+                this.showToast('Carpeta cambiada correctamente', 'success');
+            }
+        } catch (error) {
+            this.showToast('Error cambiando carpeta: ' + error.message, 'error');
+        }
+    }
+
+    // Taxonomy Management
+    async loadTaxonomies() {
+        if (!this.currentProfile) return;
+        
+        try {
+            const [categories, tags] = await Promise.all([
+                this.apiCall(`/categories/${this.selectedProfileName}`),
+                this.apiCall(`/tags/${this.selectedProfileName}`)
+            ]);
+            
+            this.availableCategories = categories;
+            this.availableTags = tags;
+        } catch (error) {
+            this.showToast('Error cargando taxonomías: ' + error.message, 'error');
+        }
+    }
+
+    openTaxonomyModal(type) {
+        if (!this.currentProfile) {
+            this.showToast('Selecciona un perfil primero', 'warning');
+            return;
+        }
+
+        this.currentTaxonomyType = type;
+        this.currentArticleIndex = null; // Global selection
+        const modal = document.getElementById('taxonomy-modal');
+        const title = document.getElementById('taxonomy-modal-title');
+        
+        title.innerHTML = type === 'categories' ? 
+            '<i class="fas fa-tags"></i> Seleccionar Categorías (Global)' : 
+            '<i class="fas fa-hashtag"></i> Seleccionar Etiquetas (Global)';
+        
+        this.populateTaxonomyModal(type);
+        this.showModal('taxonomy-modal');
+    }
+
+    openIndividualTaxonomyModal(articleIndex, type) {
+        if (!this.currentProfile) {
+            this.showToast('Selecciona un perfil primero', 'warning');
+            return;
+        }
+
+        this.currentTaxonomyType = type;
+        this.currentArticleIndex = articleIndex; // Individual selection
+        const modal = document.getElementById('taxonomy-modal');
+        const title = document.getElementById('taxonomy-modal-title');
+        const article = this.articles[articleIndex];
+        
+        title.innerHTML = type === 'categories' ? 
+            `<i class="fas fa-tags"></i> Categorías para: ${article.name}` : 
+            `<i class="fas fa-hashtag"></i> Etiquetas para: ${article.name}`;
+        
+        this.populateIndividualTaxonomyModal(type, articleIndex);
+        this.showModal('taxonomy-modal');
+    }
+
+    populateTaxonomyModal(type) {
+        const container = document.getElementById('taxonomy-items');
+        const items = type === 'categories' ? this.availableCategories : this.availableTags;
+        const selected = type === 'categories' ? this.selectedCategories : this.selectedTags;
+        
+        container.innerHTML = '';
+        
+        items.forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'taxonomy-item';
+            div.innerHTML = `
+                <input type="checkbox" value="${item.id}" ${selected.includes(item.id) ? 'checked' : ''}>
+                <span>${item.name}</span>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    populateIndividualTaxonomyModal(type, articleIndex) {
+        const container = document.getElementById('taxonomy-items');
+        const items = type === 'categories' ? this.availableCategories : this.availableTags;
+        const article = this.articles[articleIndex];
+        const selected = type === 'categories' ? article.categories : article.tags;
+        
+        container.innerHTML = '';
+        
+        items.forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'taxonomy-item';
+            div.innerHTML = `
+                <input type="checkbox" value="${item.id}" ${selected.includes(item.id) ? 'checked' : ''}>
+                <span>${item.name}</span>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    acceptTaxonomySelection() {
+        const checkboxes = document.querySelectorAll('#taxonomy-items input[type="checkbox"]:checked');
+        const selectedIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+        const items = this.currentTaxonomyType === 'categories' ? this.availableCategories : this.availableTags;
+        
+        if (this.currentArticleIndex !== null) {
+            // Individual article selection
+            if (this.currentTaxonomyType === 'categories') {
+                this.articles[this.currentArticleIndex].categories = selectedIds;
+            } else {
+                this.articles[this.currentArticleIndex].tags = selectedIds;
+            }
+            this.renderArticleTable(); // Refresh table to show updated values
+        } else {
+            // Global selection
+            if (this.currentTaxonomyType === 'categories') {
+                this.selectedCategories = selectedIds;
+                this.updateTaxonomyDisplay('categories', selectedIds, items);
+            } else {
+                this.selectedTags = selectedIds;
+                this.updateTaxonomyDisplay('tags', selectedIds, items);
+            }
+        }
+        
+        this.closeModal('taxonomy-modal');
+    }
+
+    updateTaxonomyDisplay(type, selectedIds, items) {
+        const element = document.getElementById(`selected-${type}`);
+        if (selectedIds.length === 0) {
+            element.textContent = type === 'categories' ? 'Ninguna seleccionada' : 'Ninguna seleccionadas';
+        } else {
+            const names = selectedIds.map(id => {
+                const item = items.find(i => i.id === id);
+                return item ? item.name : '';
+            }).filter(name => name);
+            element.textContent = names.join(', ');
+        }
+    }
+
+    showPublishResults(results) {
+        const modal = document.getElementById('results-modal');
+        const content = document.getElementById('results-content');
+        
+        let html = '<div style="margin-bottom: 1rem;">';
+        
+        const successful = results.filter(r => r.success);
+        const failed = results.filter(r => !r.success);
+        
+        if (successful.length > 0) {
+            html += '<h3 style="color: #059669; margin-bottom: 1rem;">✅ Publicados correctamente:</h3>';
+            successful.forEach(result => {
+                html += `
+                    <div style="padding: 0.75rem; margin-bottom: 0.5rem; background: #f0fdf4; border-left: 4px solid #10b981; border-radius: 0.5rem;">
+                        <strong>${result.filename}</strong> - Estado: ${result.status === 'publish' ? '🟢 Publicado' : '🟡 Borrador'}<br>
+                        <a href="${result.url}" target="_blank" style="color: #059669;">Ver artículo →</a>
+                    </div>
+                `;
+            });
+        }
+        
+        if (failed.length > 0) {
+            html += '<h3 style="color: #dc2626; margin-bottom: 1rem; margin-top: 2rem;">❌ Errores:</h3>';
+            failed.forEach(result => {
+                html += `
+                    <div style="padding: 0.75rem; margin-bottom: 0.5rem; background: #fef2f2; border-left: 4px solid #ef4444; border-radius: 0.5rem;">
+                        <strong>${result.filename}</strong><br>
+                        <span style="color: #dc2626;">${result.error}</span>
+                    </div>
+                `;
+            });
+        }
+        
+        html += '</div>';
+        content.innerHTML = html;
+        this.showModal('results-modal');
+    }
+
+    // Profile Modal Management
+    openProfileModal() {
+        this.loadProfilesForModal();
+        this.showModal('profile-modal');
+    }
+
+    async loadProfilesForModal() {
+        try {
+            const profiles = await this.apiCall('/profiles');
+            this.populateProfilesModal(profiles);
+        } catch (error) {
+            this.showToast('Error cargando perfiles: ' + error.message, 'error');
+        }
+    }
+
+    populateProfilesModal(profiles) {
+        const container = document.getElementById('profiles-container');
+        container.innerHTML = '';
+
+        if (profiles.length === 0) {
+            container.innerHTML = '<p style="text-align: center; color: #6b7280; padding: 2rem;">No hay perfiles configurados</p>';
+            return;
+        }
+
+        profiles.forEach(profile => {
+            const div = document.createElement('div');
+            div.className = `profile-item ${profile.name === this.selectedProfileName ? 'selected' : ''}`;
+            div.onclick = () => this.selectProfileInModal(profile.name, div);
+            
+            div.innerHTML = `
+                <div class="profile-item-info">
+                    <div class="profile-item-name">${profile.name}</div>
+                    <div class="profile-item-details">${profile.url} (${profile.username})</div>
+                </div>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    selectProfileInModal(profileName, element) {
+        document.querySelectorAll('.profile-item').forEach(item => {
+            item.classList.remove('selected');
+        });
+        
+        element.classList.add('selected');
+        this.selectedProfileName = profileName;
+        
+        document.getElementById('test-connection-btn').disabled = false;
+        document.getElementById('delete-profile-btn').disabled = false;
+    }
+
+    openProfileForm() {
+        this.showModal('profile-form-modal');
+    }
+
+    async saveProfile(e) {
+        e.preventDefault();
+        
+        const formData = {
+            name: document.getElementById('profile-name').value,
+            url: document.getElementById('profile-url').value,
+            username: document.getElementById('profile-username').value,
+            app_password: document.getElementById('profile-password').value
+        };
+
+        try {
+            this.showLoading('Guardando perfil...');
+            await this.apiCall('/profiles', 'POST', formData);
+            this.hideLoading();
+            this.closeModal('profile-form-modal');
+            this.loadProfiles();
+            this.loadProfilesForModal();
+            this.showToast('Perfil guardado correctamente', 'success');
+            
+            document.getElementById('profile-form').reset();
+        } catch (error) {
+            this.hideLoading();
+            this.showToast('Error guardando perfil: ' + error.message, 'error');
+        }
+    }
+
+    async testConnection() {
+        if (!this.selectedProfileName) return;
+
+        try {
+            this.showLoading('Probando conexión...');
+            await this.apiCall(`/test-connection/${this.selectedProfileName}`);
+            this.hideLoading();
+            this.showToast('✅ Conexión exitosa', 'success');
+        } catch (error) {
+            this.hideLoading();
+            this.showToast('❌ Error de conexión: ' + error.message, 'error');
+        }
+    }
+
+    async deleteProfile() {
+        if (!this.selectedProfileName) return;
+
+        if (!confirm(`¿Estás seguro de eliminar el perfil "${this.selectedProfileName}"?`)) {
+            return;
+        }
+
+        try {
+            this.showLoading('Eliminando perfil...');
+            await this.apiCall(`/profiles/${this.selectedProfileName}`, 'DELETE');
+            this.hideLoading();
+            this.loadProfiles();
+            this.loadProfilesForModal();
+            this.showToast('Perfil eliminado correctamente', 'success');
+            
+            this.selectedProfileName = null;
+            document.getElementById('test-connection-btn').disabled = true;
+            document.getElementById('delete-profile-btn').disabled = true;
+        } catch (error) {
+            this.hideLoading();
+            this.showToast('Error eliminando perfil: ' + error.message, 'error');
+        }
+    }
+
+    // Utility Methods
+    formatFileSize(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    formatDate(dateString) {
+        return new Date(dateString).toLocaleDateString('es-ES', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    }
+
+    updateStatus(message) {
+        document.getElementById('status-text').textContent = message;
+    }
+
+    showLoading(message = 'Cargando...') {
+        document.getElementById('loading-text').textContent = message;
+        document.getElementById('loading-overlay').style.display = 'flex';
+    }
+
+    hideLoading() {
+        document.getElementById('loading-overlay').style.display = 'none';
+    }
+
+    showModal(modalId) {
+        document.getElementById(modalId).classList.add('show');
+    }
+
+    closeModal(modalId) {
+        document.getElementById(modalId).classList.remove('show');
+    }
+
+    showToast(message, type = 'info') {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        
+        container.appendChild(toast);
+        
+        setTimeout(() => {
+            toast.remove();
+        }, 5000);
+    }
+
+    // Taxonomy search and filtering
+    filterTaxonomy(searchTerm) {
+        const items = document.querySelectorAll('#taxonomy-items .taxonomy-item');
+        items.forEach(item => {
+            const text = item.textContent.toLowerCase();
+            item.style.display = text.includes(searchTerm.toLowerCase()) ? 'flex' : 'none';
+        });
+    }
+
+    selectAllTaxonomy() {
+        const checkboxes = document.querySelectorAll('#taxonomy-items input[type="checkbox"]');
+        checkboxes.forEach(cb => cb.checked = true);
+    }
+
+    deselectAllTaxonomy() {
+        const checkboxes = document.querySelectorAll('#taxonomy-items input[type="checkbox"]');
+        checkboxes.forEach(cb => cb.checked = false);
+    }
+
+    async addNewTaxonomyItem() {
+        const input = document.getElementById('new-taxonomy-item');
+        const name = input.value.trim();
+        
+        if (!name) {
+            this.showToast('Ingresa un nombre para el nuevo elemento', 'warning');
+            return;
+        }
+
+        try {
+            const endpoint = this.currentTaxonomyType === 'categories' ? '/categories' : '/tags';
+            await this.apiCall(`${endpoint}/${this.selectedProfileName}`, 'POST', { name });
+            
+            await this.loadTaxonomies();
+            this.populateTaxonomyModal(this.currentTaxonomyType);
+            
+            input.value = '';
+            this.showToast(`${this.currentTaxonomyType === 'categories' ? 'Categoría' : 'Etiqueta'} agregada correctamente`, 'success');
+        } catch (error) {
+            this.showToast('Error agregando elemento: ' + error.message, 'error');
+        }
+    }
+}
+
+// Initialize improved application
+const app = new WordPressPublisherImproved();
+
+// Global functions for HTML event handlers
+function closeModal(modalId) {
+    app.closeModal(modalId);
+}
