@@ -38,3 +38,5 @@ web-app/
 - **SSL automático** y CDN global
 
 ¡Tu aplicación estará disponible mundialmente en minutos!
+
+🚀 **Deployed to Vercel:** https://wordpress-publisher-web.vercel.app
