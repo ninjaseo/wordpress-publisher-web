@@ -12,16 +12,16 @@
       "dest": "/static/$1"
     },
     {
-      "src": "/",
-      "dest": "/frontend/index.html"
-    },
-    {
       "src": "/api/(.*)",
       "dest": "/api/index.py"
     },
     {
-      "src": "/(.*)",
+      "src": "/",
       "dest": "/frontend/index.html"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/index.py"
     }
   ],
   "functions": {
